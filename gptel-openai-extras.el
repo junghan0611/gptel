@@ -178,13 +178,13 @@ for."
 (cl-defstruct (gptel-perplexity (:constructor gptel--make-perplexity)
 				(:copier nil)
 				(:include gptel-openai)))
-
-(defsubst gptel--perplexity-parse-citations (citations)
+;; defsubst
+(defun gptel--perplexity-parse-citations (citations)
   (let ((counter 0))
-    (concat "\n\nCitations:\n"
+    (concat "\n\n- Citations:\n"
             (mapconcat (lambda (url)
                          (setq counter (1+ counter))
-                         (format "- [%d] %s" counter (decode-coding-string (url-unhex-string url t) 'utf-8)))
+                         (format "[%d] %s" counter (decode-coding-string (url-unhex-string url t) 'utf-8)))
                        citations "\n"))))
 
 (cl-defmethod gptel--parse-response ((_backend gptel-perplexity) response _info)
