@@ -292,10 +292,7 @@ BUF is the buffer to modify, defaults to the overlay buffer."
               ((buffer-live-p ov-buf)))
     (require 'diff)
     (let* ((newbuf (gptel--rewrite-prepare-buffer ovs))
-           (diff-buf (diff-no-select
-                      (if-let* ((buf-file (buffer-file-name ov-buf)))
-                          (expand-file-name buf-file) ov-buf)
-                      newbuf switches)))
+           (diff-buf (diff-no-select ov-buf newbuf switches)))
       (with-current-buffer diff-buf
         (setq-local diff-jump-to-old-file t))
       (display-buffer diff-buf))))
@@ -363,7 +360,8 @@ OV is the rewrite overlay, CI is true for interactive calls."
            (concat
             (unless (eq (char-before (overlay-start ov)) ?\n) "\n")
             (propertize "REWRITE READY: " 'face 'success)
-            (mapconcat (lambda (e) (cdr e)) (mapcar #'rmc--add-key-description choices) ", ")
+	    (when (fboundp #'rmc--add-key-description)  ; introduced in Emacs 29
+              (mapconcat (lambda (e) (cdr e)) (mapcar #'rmc--add-key-description choices) ", "))
             (propertize
              " " 'display `(space :align-to (- right ,(1+ (length hint-str)))))
             (propertize hint-str 'face 'success)))
@@ -399,6 +397,8 @@ INFO is the async communication channel for the rewrite request."
             (when (eq (char-before (point-max)) ?\n)
               (plist-put info :newline t))
             (delay-mode-hooks (funcall (buffer-local-value 'major-mode buf)))
+	    ;; message.el and possily others set these when entering the major mode. (#730)
+	    (setq buffer-file-name nil buffer-auto-save-file-name nil)
             (add-text-properties (point-min) (point-max) '(face shadow font-lock-face shadow))
             (goto-char (point-min)))
           (insert response)
@@ -414,6 +414,7 @@ INFO is the async communication channel for the rewrite request."
       (message (concat "LLM response error: %s. Rewrite in buffer %s canceled.")
                (plist-get info :status) (plist-get info :buffer))
       (gptel--rewrite-callback 'abort info))
+     ((consp response)) ;reasoning or tool calls -- don't care and not implemented, respectively
      (t (let ((proc-buf (cdr-safe (plist-get info :context))) ;finished successfully
               (mkb (propertize "<mouse-1>" 'face 'help-key-binding)))
           (with-current-buffer proc-buf
@@ -631,7 +632,8 @@ generated from functions."
                            (make-overlay (region-beginning) (region-end) nil t))))
                (overlay-put ov 'category 'gptel)
                (overlay-put ov 'evaporate t)
-               (cons ov (generate-new-buffer "*gptel-rewrite*")))
+               ;; NOTE: Switch to `generate-new-buffer' after we drop Emacs 27.1 (#724)
+               (cons ov (gptel--temp-buffer " *gptel-rewrite*")))
              :callback #'gptel--rewrite-callback)
       ;; Move back so that the cursor is on the overlay when done.
       (unless (get-char-property (point) 'gptel-rewrite)
