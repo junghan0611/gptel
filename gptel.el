@@ -2132,10 +2132,10 @@ Run post-response hooks."
 (defun gptel--error-p (info) (plist-get info :error))
 
 (defun gptel--tool-use-p (info)
-  (and gptel-use-tools (plist-get info :tool-use)))
+  (and (plist-get info :tools) (plist-get info :tool-use)))
 
 (defun gptel--tool-result-p (info)
-  (and gptel-use-tools (plist-get info :tool-success)))
+  (and (plist-get info :tools) (plist-get info :tool-success)))
 
 
 ;;; Send queries, handle responses
@@ -2763,6 +2763,8 @@ the response is inserted into the current buffer after point."
                            (if (functionp backend-url)
                                (funcall backend-url) backend-url))
                          (lambda (_)
+                           (set-buffer-multibyte t)
+                           (set-buffer-file-coding-system 'utf-8-unix)
                            (pcase-let ((`(,response ,http-status ,http-msg ,error)
                                         (gptel--url-parse-response backend info))
                                        (buf (current-buffer)))
