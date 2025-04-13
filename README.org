@@ -21,6 +21,7 @@ gptel is a simple Large Language Model chat client for Emacs, with support for m
 | Kagi Summarizer    | ✓        | [[https://kagi.com/settings?p=api][API key]]                    |
 | Azure              | ✓        | Deployment and API key     |
 | Groq               | ✓        | [[https://console.groq.com/keys][API key]]                    |
+| Mistral Le Chat    | ✓        | [[https://console.mistral.ai/api-keys][API key]]                    |
 | Perplexity         | ✓        | [[https://docs.perplexity.ai/docs/getting-started][API key]]                    |
 | OpenRouter         | ✓        | [[https://openrouter.ai/keys][API key]]                    |
 | together.ai        | ✓        | [[https://api.together.xyz/settings/api-keys][API key]]                    |
@@ -31,6 +32,7 @@ gptel is a simple Large Language Model chat client for Emacs, with support for m
 | Github Models      | ✓        | [[https://github.com/settings/tokens][Token]]                      |
 | Novita AI          | ✓        | [[https://novita.ai/model-api/product/llm-api?utm_source=github_gptel&utm_medium=github_readme&utm_campaign=link][Token]]                      |
 | xAI                | ✓        | [[https://console.x.ai?utm_source=github_gptel&utm_medium=github_readme&utm_campaign=link][API key]]                    |
+| Github CopilotChat | ✓        | Github account             |
 #+html: </div>
 
 *General usage*: ([[https://www.youtube.com/watch?v=bsRnh_brggM][YouTube Demo]])
@@ -45,7 +47,7 @@ https://user-images.githubusercontent.com/8607532/230516816-ae4a613a-4d01-4073-a
 https://github.com/user-attachments/assets/cec11aec-52f6-412e-9e7a-9358e8b9b1bf
 #+html: </p>
 
-*Tool use* (experimental)
+*Tool use*
 
 #+html: <p align="center">
 https://github.com/user-attachments/assets/5f993659-4cfd-49fa-b5cd-19c55766b9b2
@@ -73,7 +75,7 @@ See also [[https://youtu.be/g1VMGhC5gRU][this youtube demo (2 minutes)]] by Armi
 - Interact with LLMs from anywhere in Emacs (any buffer, shell, minibuffer, wherever).
 - LLM responses are in Markdown or Org markup.
 - Supports multiple independent conversations and one-off ad hoc interactions.
-- Supports tool-use to equip LLMs with agentic capabilities (experimental feature).
+- Supports tool-use to equip LLMs with agentic capabilities.
 - Supports multi-modal input (include images, documents).
 - Save chats as regular Markdown/Org/Text files and resume them later.
 - Edit your previous prompts or LLM responses when continuing a conversation. These will be fed back to the model.
@@ -104,6 +106,7 @@ gptel uses Curl if available, but falls back to the built-in url-retrieve to wor
       - [[#perplexity][Perplexity]]
       - [[#anthropic-claude][Anthropic (Claude)]]
       - [[#groq][Groq]]
+      - [[#mistral-le-chat][Mistral Le Chat]]
       - [[#openrouter][OpenRouter]]
       - [[#privategpt][PrivateGPT]]
       - [[#deepseek][DeepSeek]]
@@ -111,6 +114,7 @@ gptel uses Curl if available, but falls back to the built-in url-retrieve to wor
       - [[#github-models][Github Models]]
       - [[#novita-ai][Novita AI]]
       - [[#xai][xAI]]
+      - [[#github-copilotchat][Github CopilotChat]]
   - [[#usage][Usage]]
     - [[#in-any-buffer][In any buffer:]]
     - [[#in-a-dedicated-chat-buffer][In a dedicated chat buffer:]]
@@ -119,7 +123,7 @@ gptel uses Curl if available, but falls back to the built-in url-retrieve to wor
     - [[#setting-options-backend-model-request-parameters-system-prompts-and-more][Setting options (backend, model, request parameters, system prompts and more)]]
     - [[#include-more-context-with-requests][Include more context with requests]]
     - [[#handle-reasoning-content][Handle "reasoning" content]]
-    - [[#tool-use-experimental][Tool use (experimental)]]
+    - [[#tool-use][Tool use]]
       - [[#defining-gptel-tools][Defining gptel tools]]
       - [[#selecting-tools][Selecting tools]]
     - [[#rewrite-refactor-or-fill-in-a-region][Rewrite, refactor or fill in a region]]
@@ -339,7 +343,7 @@ The above code makes the backend available to select.  If you want it to be the 
 #+begin_src emacs-lisp
 ;; OPTIONAL configuration
 (setq
- gptel-model 'gemini-pro
+ gptel-model 'gemini-2.5-pro-exp-03-25
  gptel-backend (gptel-make-gemini "Gemini"
                  :key "YOUR_GEMINI_API_KEY"
                  :stream t))
@@ -603,6 +607,41 @@ The above code makes the backend available to select.  If you want it to be the 
 #+html: </details>
 
 #+html: <details><summary>
+**** Mistral Le Chat
+#+html: </summary>
+
+Register a backend with
+#+begin_src emacs-lisp
+;; Mistral offers an OpenAI compatible API
+(gptel-make-openai "MistralLeChat"  ;Any name you want
+  :host "api.mistral.ai"
+  :endpoint "/v1/chat/completions"
+  :protocol "https"
+  :key "your-api-key"               ;can be a function that returns the key
+  :models '("mistral-small"))
+#+end_src
+
+You can pick this backend from the menu when using gptel (see [[#usage][Usage]]).
+
+***** (Optional) Set as the default gptel backend
+
+The above code makes the backend available to select.  If you want it to be the default backend for gptel, you can set this as the value of =gptel-backend=.  Use this instead of the above.
+#+begin_src emacs-lisp
+;; OPTIONAL configuration
+(setq gptel-model   'mistral-small
+      gptel-backend
+      (gptel-make-openai "MistralLeChat"  ;Any name you want
+        :host "api.mistral.ai"
+        :endpoint "/v1/chat/completions"
+        :protocol "https"
+        :key "your-api-key"               ;can be a function that returns the key
+        :models '("mistral-small")))
+#+end_src
+
+#+html: </details>
+
+#+html: <details><summary>
+
 **** OpenRouter
 #+html: </summary>
 
@@ -827,14 +866,9 @@ The above code makes the backend available to select.  If you want it to be the 
 
 Register a backend with
 #+begin_src emacs-lisp
-;; xAI offers an OpenAI compatible API
-(gptel-make-openai "xAI"           ;Any name you want
-  :host "api.x.ai"
-  :key "your-api-key"              ;can be a function that returns the key
-  :endpoint "/v1/chat/completions"
+(gptel-make-xai "xAI"                   ; Any name you want
   :stream t
-  :models '(;; xAI now only offers `grok-beta` as of the time of this writing
-            grok-beta))
+  :key "your-api-key")                  ; can be a function that returns the key
 #+end_src
 
 You can pick this backend from the menu when using gptel (see [[#usage][Usage]])
@@ -843,17 +877,34 @@ You can pick this backend from the menu when using gptel (see [[#usage][Usage]])
 
 The above code makes the backend available to select.  If you want it to be the default backend for gptel, you can set this as the value of =gptel-backend=.  Use this instead of the above.
 #+begin_src emacs-lisp
+(setq gptel-model 'grok-3-latest
+      gptel-backend
+      (gptel-make-xai "xAI"               ; Any name you want
+        :key "your-api-key" ; can be a function that returns the key
+        :stream t))
+#+end_src
+
+#+html: </details>
+
+#+html: <details><summary>
+**** Github CopilotChat
+#+html: </summary>
+
+Register a backend with
+#+begin_src emacs-lisp
+(gptel-make-gh-copilot "Copilot")
+#+end_src
+
+You will be informed to login into =Github= as required.
+You can pick this backend from the menu when using gptel (see [[#usage][Usage]]).
+
+***** (Optional) Set as the default gptel backend
+
+The above code makes the backend available to select.  If you want it to be the default backend for gptel, you can set this as the value of =gptel-backend=.  Use this instead of the above.
+#+begin_src emacs-lisp
 ;; OPTIONAL configuration
-(setq
- gptel-model   'grok-beta
- gptel-backend
- (gptel-make-openai "xAI"           ;Any name you want
-   :host "api.x.ai"
-   :key "your-api-key"              ;can be a function that returns the key
-   :endpoint "/v1/chat/completions"
-   :stream t
-   :models '(;; xAI now only offers `grok-beta` as of the time of this writing
-             grok-beta)))
+(setq gptel-model 'claude-3.7-sonnet
+      gptel-backend (gptel-make-gh-copilot "Copilot"))
 #+end_src
 
 #+html: </details>
@@ -1031,7 +1082,7 @@ Some LLMs include in their response a "thinking" or "reasoning" block.  This tex
 
 When included with the response, reasoning content will be delimited by Org blocks or markdown backticks.
 
-*** Tool use (experimental)
+*** Tool use
 
 gptel can provide the LLM with client-side elisp "tools", or function specifications, along with the request.  If the LLM decides to run the tool, it supplies the tool call arguments, which gptel uses to run the tool in your Emacs session.  The result is optionally returned to the LLM to complete the task.
 
@@ -1040,8 +1091,6 @@ This exchange can be used to equip the LLM with capabilities or knowledge beyond
 #+html: <p align="center">
 https://github.com/user-attachments/assets/d1f8e2ac-62bb-49bc-850d-0a67aa0cd4c3
 #+html: </p>
-
-This feature is currently experimental.
 
 To use tools in gptel, you need
 - a model that supports this usage.  All the flagship models support tool use, as do many of the smaller open models.

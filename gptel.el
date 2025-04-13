@@ -481,8 +481,9 @@ of the response, with 2.0 being the most random.
 
 To set the temperature for a chat session interactively call
 `gptel-send' with a prefix argument."
-  :safe #'always
-  :type 'number)
+  :safe (lambda (v) (or (null v) (numberp v)))
+  :type '(choice (number :tag "Temperature value")
+                 (const :tag "Use default" nil)))
 
 (defcustom gptel-cache nil
   "Whether the LLM should cache request content.
@@ -912,6 +913,19 @@ Later plists in the sequence take precedence over earlier ones."
         (setq rtn (plist-put rtn p v))))
     rtn))
 
+(cl-defun gptel--url-retrieve (url &key method data headers)
+  "Retrieve URL synchronously with METHOD, DATA and HEADERS."
+  (declare (indent 1))
+  (let ((url-request-method (if (eq method'post) "POST" "GET"))
+        (url-request-data (encode-coding-string (gptel--json-encode data) 'utf-8))
+        (url-mime-accept-string "application/json")
+        (url-request-extra-headers
+         `(("content-type" . "application/json")
+           ,@headers)))
+    (with-current-buffer (url-retrieve-synchronously url 'silent)
+      (goto-char url-http-end-of-headers)
+      (gptel--json-read))))
+
 (defun gptel-auto-scroll ()
   "Scroll window if LLM response continues below viewport.
 
@@ -1118,7 +1132,8 @@ FILE is assumed to exist and be a regular file."
     (enh-ruby-mode . "Ruby")
     (yaml-mode     . "Yaml")
     (yaml-ts-mode  . "Yaml")
-    (rustic-mode   . "Rust"))
+    (rustic-mode   . "Rust")
+    (tuareg-mode   . "OCaml"))
   "Mapping from unconventionally named major modes to languages.
 
 This is used when generating system prompts for rewriting and
@@ -1968,9 +1983,12 @@ Handle read-only buffers and run pre-response hooks (but only if
 the request succeeded)."
   (let* ((info (gptel-fsm-info fsm))
          (start-marker (plist-get info :position)))
-    (when (with-current-buffer (plist-get info :buffer)
-            (or buffer-read-only
-                (get-char-property start-marker 'read-only)))
+    (when (and
+           (memq (plist-get info :callback)
+                 '(gptel--insert-response gptel-curl--stream-insert-response))
+           (with-current-buffer (plist-get info :buffer)
+             (or buffer-read-only
+                 (get-char-property start-marker 'read-only))))
       (message "Buffer is read only, displaying reply in buffer \"*LLM response*\"")
       (display-buffer
        (with-current-buffer (get-buffer-create "*LLM response*")
