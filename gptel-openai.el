@@ -201,7 +201,7 @@ information if the stream contains it."
                   (cl-loop
                    for tool-call in tool-use ; Construct the call specs for running the function calls
                    for spec = (plist-get tool-call :function)
-                   collect (list :id (gptel--openai-unformat-tool-id (plist-get tool-call :id))
+                   collect (list :id (plist-get tool-call :id)
                                  :name (plist-get spec :name)
                                  :args (ignore-errors (gptel--json-read-string
                                                        (plist-get spec :arguments))))
@@ -210,7 +210,7 @@ information if the stream contains it."
               (when-let* ((response (gptel--json-read))
                           (delta (map-nested-elt response '(:choices 0 :delta))))
                 (if-let* ((content (plist-get delta :content))
-                          ((not (eq content :null))))
+                          ((not (or (eq content :null) (string-empty-p content)))))
                     (push content content-strs)
                   ;; No text content, so look for tool calls
                   (when-let* ((tool-call (map-nested-elt delta '(:tool_calls 0)))
@@ -257,26 +257,27 @@ Mutate state INFO with response metadata."
                (plist-get choice0 :finish_reason))
     (plist-put info :output-tokens
                (map-nested-elt response '(:usage :completion_tokens)))
-    ;; OpenAI returns either non-blank text content or a tool call, not both
-    (if (and content (not (or (eq content :null) (string-empty-p content))))
-        (prog1 content
-          (when-let* ((reasoning (plist-get message :reasoning)) ;look for reasoning blocks
-                      ((and (stringp reasoning) (not (string-empty-p reasoning)))))
-            (plist-put info :reasoning reasoning)))
-      (prog1 nil                        ; Look for tool calls only if no content
-        (when-let* ((tool-calls (plist-get message :tool_calls)))
-          (gptel--inject-prompt    ; First add the tool call to the prompts list
-           (plist-get info :backend) (plist-get info :data) message)
-          (cl-loop         ;Then capture the tool call data for running the tool
-           for tool-call across tool-calls ;replace ":arguments" with ":args"
-           for call-spec = (copy-sequence (plist-get tool-call :function))
-           do (ignore-errors (plist-put call-spec :args
-                                        (gptel--json-read-string
-                                         (plist-get call-spec :arguments))))
-           (plist-put call-spec :arguments nil)
-           (plist-put call-spec :id (gptel--openai-unformat-tool-id (plist-get tool-call :id)))
-           collect call-spec into tool-use
-           finally (plist-put info :tool-use tool-use)))))))
+    ;; OpenAI returns either non-blank text content or a tool call, not both.
+    ;; However OpenAI-compatible APIs like llama.cpp can include both (#819), so
+    ;; we check for both tool calls and responses independently.
+    (when-let* ((tool-calls (plist-get message :tool_calls)))
+      (gptel--inject-prompt        ; First add the tool call to the prompts list
+       (plist-get info :backend) (plist-get info :data) message)
+      (cl-loop             ;Then capture the tool call data for running the tool
+       for tool-call across tool-calls  ;replace ":arguments" with ":args"
+       for call-spec = (copy-sequence (plist-get tool-call :function))
+       do (ignore-errors (plist-put call-spec :args
+                                    (gptel--json-read-string
+                                     (plist-get call-spec :arguments))))
+       (plist-put call-spec :arguments nil)
+       (plist-put call-spec :id (plist-get tool-call :id))
+       collect call-spec into tool-use
+       finally (plist-put info :tool-use tool-use)))
+    (when (and content (not (or (eq content :null) (string-empty-p content))))
+      (when-let* ((reasoning (plist-get message :reasoning)) ;look for reasoning blocks
+                  ((and (stringp reasoning) (not (string-empty-p reasoning)))))
+        (plist-put info :reasoning reasoning))
+      content)))
 
 (cl-defmethod gptel--request-data ((backend gptel-openai) prompts)
   "JSON encode PROMPTS for sending to ChatGPT."
@@ -322,11 +323,11 @@ Mutate state INFO with response metadata."
    (lambda (tool-call)
      (list
       :role "tool"
-      :tool_call_id (gptel--openai-format-tool-id
-                     (plist-get tool-call :id))
+      :tool_call_id (plist-get tool-call :id)
       :content (plist-get tool-call :result)))
    tool-use))
 
+;; TODO: Remove these functions (#792)
 (defun gptel--openai-format-tool-id (tool-id)
   "Format TOOL-ID for OpenAI.
 
@@ -348,11 +349,34 @@ If the ID has the format used by a different backend, use as-is."
 ;; NOTE: No `gptel--inject-prompt' method required for gptel-openai, since this
 ;; is handled by its defgeneric implementation
 
-(cl-defmethod gptel--parse-list ((_backend gptel-openai) prompt-list)
-  (cl-loop for text in prompt-list
-           for role = t then (not role)
-           if text collect
-           (list :role (if role "user" "assistant") :content text)))
+(cl-defmethod gptel--parse-list ((backend gptel-openai) prompt-list)
+  (if (stringp (car prompt-list))
+      (cl-loop for text in prompt-list  ; Simple format, list of strings
+               for role = t then (not role)
+               if text collect
+               (list :role (if role "user" "assistant") :content text))
+    (let ((full-prompt))                ; Advanced format, list of lists
+      (dolist (entry prompt-list)
+        (pcase entry
+          (`(prompt . ,msg)
+           (push (list :role "user" :content (or (car-safe msg) msg)) full-prompt))
+          (`(response . ,msg)
+           (push (list :role "assistant" :content (or (car-safe msg) msg)) full-prompt))
+          (`(tool . ,call)
+           (unless (plist-get call :id)
+             (plist-put call :id (gptel--openai-format-tool-id nil)))
+           (push
+            (list
+             :role "assistant"
+             :tool_calls
+             (vector
+              (list :type "function"
+                    :id (plist-get call :id)
+                    :function `( :name ,(plist-get call :name)
+                                 :arguments ,(gptel--json-encode (plist-get call :args))))))
+            full-prompt)
+           (push (car (gptel--parse-tool-results backend (list (cdr entry)))) full-prompt))))
+      (nreverse full-prompt))))
 
 (cl-defmethod gptel--parse-buffer ((backend gptel-openai) &optional max-entries)
   (let ((prompts) (prev-pt (point))
@@ -384,7 +408,7 @@ If the ID has the format used by a different backend, use as-is."
                      (push (list :role "assistant"
                                  :tool_calls
                                  (vector (list :type "function"
-                                               :id (gptel--openai-format-tool-id id)
+                                               :id id
                                                :function `( :name ,name
                                                             :arguments ,arguments))))
                            prompts))

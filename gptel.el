@@ -954,15 +954,15 @@ Note: This will move the cursor."
     (dotimes (_ (abs arg))
       (funcall search 'gptel 'response t)
       (if (> arg 0)
-          (when (looking-at (concat "\n\\{1,2\\}"
-                                    (regexp-quote
-                                     (gptel-prompt-prefix-string))
-                                    "?"))
+          (when-let* ((prefix (gptel-prompt-prefix-string))
+                      ((not (string-empty-p prefix)))
+                      ((looking-at (concat "\n\\{1,2\\}"
+                                           (regexp-quote prefix) "?"))))
             (goto-char (match-end 0)))
-        (when (looking-back (concat (regexp-quote
-                                     (gptel-response-prefix-string))
-                                    "?")
-                            (point-min))
+        (when-let* ((prefix (gptel-response-prefix-string))
+                    ((not (string-empty-p prefix)))
+                    ((looking-back (concat (regexp-quote prefix) "?")
+                                   (point-min))))
           (goto-char (match-beginning 0)))))))
 
 (defmacro gptel--at-word-end (&rest body)
@@ -1979,7 +1979,7 @@ buffer."
   ;; a second network request: gptel tests for the presence of these flags to
   ;; handle state transitions.  (NOTE: Don't add :token to this.)
   (let ((info (gptel-fsm-info fsm)))
-    (dolist (key '(:tool-success :tool-use :error :http-status))
+    (dolist (key '(:tool-success :tool-use :error :http-status :reasoning))
       (when (plist-get info key)
         (plist-put info key nil))))
   (funcall
@@ -2170,6 +2170,7 @@ Run post-response hooks."
 (defun gptel--tool-result-p (info)
   (and (plist-get info :tools) (plist-get info :tool-success)))
 
+;; TODO(prompt-list): Document new prompt input format to `gptel-request'.
 
 ;;; Send queries, handle responses
 (cl-defun gptel-request
@@ -2865,7 +2866,8 @@ See `gptel-curl--get-response' for its contents.")
        ;; FIXME Handle the case where HTTP 100 is followed by HTTP (not 200) BUG #194
        ((or (memq url-http-response-status '(200 100))
             (string-match-p "\\(?:1\\|2\\)00 OK" http-msg))
-        (list (and-let* ((resp (gptel--parse-response backend response proc-info)))
+        (list (and-let* ((resp (gptel--parse-response backend response proc-info))
+                         ((not (string-blank-p resp))))
                 (string-trim resp))
               http-status http-msg))
        ((plist-get response :error)
