@@ -3,7 +3,7 @@
 ;; Copyright (C) 2023-2025  Karthik Chikmagalur
 
 ;; Author: Karthik Chikmagalur <karthik.chikmagalur@gmail.com>
-;; Version: 0.9.8
+;; Version: 0.9.8.5
 ;; Package-Requires: ((emacs "27.1") (transient "0.7.4") (compat "29.1.4.1"))
 ;; Keywords: convenience, tools
 ;; URL: https://github.com/karthink/gptel
@@ -663,8 +663,8 @@ the same as t."
      :capabilities (reasoning media tool-use json url)
      :mime-types ("image/jpeg" "image/png" "image/gif" "image/webp")
      :context-window 200
-     :input-cost 10
-     :output-cost 40
+     :input-cost 2
+     :output-cost 8
      :cutoff-date "2024-05")
     (o3-mini
      :description "High intelligence at the same cost and latency targets of o1-mini"
@@ -1017,6 +1017,16 @@ Note: This will move the cursor."
           (scroll-up-command))
       (error nil))))
 
+(defsubst gptel-prompt-prefix-string ()
+  "Prefix before user prompts in `gptel-mode'."
+  (declare (side-effect-free t))
+  (or (alist-get major-mode gptel-prompt-prefix-alist) ""))
+
+(defsubst gptel-response-prefix-string ()
+  "Prefix before LLM responses in `gptel-mode'."
+  (declare (side-effect-free t))
+  (or (alist-get major-mode gptel-response-prefix-alist) ""))
+
 (defun gptel-beginning-of-response (&optional _ _ arg)
   "Move point to the beginning of the LLM response ARG times."
   (interactive (list nil nil
@@ -1051,27 +1061,6 @@ Note: This will move the cursor."
      (skip-syntax-forward "w.")
      ,(macroexp-progn body)))
 
-(defmacro gptel--with-buffer-copy (buf start end &rest body)
-  "Copy gptel's local variables from BUF to a temp buffer and run BODY.
-
-If positions START and END are provided, insert that part of BUF first."
-  (declare (indent 3))
-  (let ((temp-buffer (make-symbol "temp-buffer")))
-    `(let ((,temp-buffer (gptel--temp-buffer " *gptel-prompt*")))
-      (with-current-buffer ,temp-buffer
-       (dolist (sym '( gptel-backend gptel--system-message gptel-model
-                       gptel-mode gptel-track-response gptel-track-media
-                       gptel-use-tools gptel-tools gptel-use-curl
-                       gptel-use-context gptel--num-messages-to-send
-                       gptel-stream gptel-include-reasoning
-                       gptel-temperature gptel-max-tokens gptel-cache))
-        (set (make-local-variable sym)
-         (buffer-local-value sym ,buf)))
-       ,(when (and start end)
-         `(insert-buffer-substring ,buf ,start ,end))
-       (setq major-mode (buffer-local-value 'major-mode ,buf))
-       ,@body))))
-
 (defmacro gptel--temp-buffer (buf)
   "Generate a temp buffer BUF.
 
@@ -1080,15 +1069,28 @@ Compatibility macro for Emacs 27.1."
       `(generate-new-buffer ,buf)
     `(generate-new-buffer ,buf t)))
 
-(defsubst gptel-prompt-prefix-string ()
-  "Prefix before user prompts in `gptel-mode'."
-  (declare (side-effect-free t))
-  (or (alist-get major-mode gptel-prompt-prefix-alist) ""))
+(defmacro gptel--with-buffer-copy (buf start end &rest body)
+  "Copy gptel's local variables from BUF to a temp buffer and run BODY.
 
-(defsubst gptel-response-prefix-string ()
-  "Prefix before LLM responses in `gptel-mode'."
-  (declare (side-effect-free t))
-  (or (alist-get major-mode gptel-response-prefix-alist) ""))
+If positions START and END are provided, insert that part of BUF first."
+  `(gptel--with-buffer-copy-internal ,buf ,start ,end (lambda () ,@body)))
+
+(defun gptel--with-buffer-copy-internal (buf start end body-thunk)
+  "Prepare a temp buffer for a gptel request.
+
+For BUF, START, END and BODY-THUNK see `gptel--with-buffer-copy'."
+  (let ((temp-buffer (gptel--temp-buffer " *gptel-prompt*")))
+    (with-current-buffer temp-buffer
+      (dolist (sym '( gptel-backend gptel--system-message gptel-model
+                      gptel-mode gptel-track-response gptel-track-media
+                      gptel-use-tools gptel-tools gptel-use-curl
+                      gptel-use-context gptel--num-messages-to-send
+                      gptel-stream gptel-include-reasoning
+                      gptel-temperature gptel-max-tokens gptel-cache))
+        (set (make-local-variable sym) (buffer-local-value sym buf)))
+      (when (and start end) (insert-buffer-substring buf start end))
+      (setq major-mode (buffer-local-value 'major-mode buf))
+      (funcall body-thunk))))
 
 (defsubst gptel--trim-prefixes (s)
   "Remove prompt/response prefixes from string S.
@@ -3569,7 +3571,10 @@ kill-ring."
            :temperature ,gptel-temperature
            :max-tokens ,gptel-max-tokens
            :use-context ',gptel-use-context
-           :include-reasoning ,gptel-include-reasoning)))
+           :track-media ,gptel-track-media
+           :include-reasoning ,(let ((reasoning gptel-include-reasoning))
+                                   (if (eq reasoning 'ignore)
+                                       ''ignore reasoning)))))
     (kill-new (pp-to-string preset-code))
     (eval preset-code)
     (message "Preset %s saved. (Lisp expression for preset saved to kill-ring)"
@@ -3726,7 +3731,7 @@ Add this to `completion-at-point-functions'."
   (and gptel--known-presets
        (save-excursion
          (let ((num (- (skip-syntax-backward "w_"))))
-           (when (= (char-before) ?@)
+           (when (eql (char-before) ?@)
              (list (point) (+ (point) num)
                    gptel--known-presets
                    :exclusive 'no
