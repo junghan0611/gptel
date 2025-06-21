@@ -906,6 +906,14 @@ or
 Each entry has the form (PROCESS . (FSM ABORT-CLOSURE))
 If the ABORT-CLOSURE is called, it must abort the PROCESS.")
 
+(defvar gptel--request-params nil
+  "Extra parameters sent with each gptel request.
+
+These parameters are combined with model-specific and backend-specific
+:request-params before sending a request, which see.  Warning: values
+incompatible with the active backend can break gptel.  Do not use this
+variable unless you know what you're doing!")
+
 
 ;;; Utility functions
 
@@ -976,7 +984,8 @@ Later plists in the sequence take precedence over earlier ones."
   (condition-case nil
       (with-temp-buffer
         (insert-file-contents path nil 1 512 'replace)
-        (eq buffer-file-coding-system 'no-conversion))
+        (memq buffer-file-coding-system
+              '(no-conversion no-conversion-multibyte)))
     (file-missing (message "File \"%s\" is not readable." path)
                   nil)))
 
@@ -1085,7 +1094,7 @@ For BUF, START, END and BODY-THUNK see `gptel--with-buffer-copy'."
                       gptel-mode gptel-track-response gptel-track-media
                       gptel-use-tools gptel-tools gptel-use-curl
                       gptel-use-context gptel--num-messages-to-send
-                      gptel-stream gptel-include-reasoning
+                      gptel-stream gptel-include-reasoning gptel--request-params
                       gptel-temperature gptel-max-tokens gptel-cache))
         (set (make-local-variable sym) (buffer-local-value sym buf)))
       (when (and start end) (insert-buffer-substring buf start end))
