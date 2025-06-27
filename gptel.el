@@ -35,7 +35,7 @@
 ;; gptel supports:
 ;;
 ;; - The services ChatGPT, Azure, Gemini, Anthropic AI, Together.ai, Perplexity,
-;;   Anyscale, OpenRouter, Groq, PrivateGPT, DeepSeek, Cerebras, Github Models,
+;;   AI/ML API, Anyscale, OpenRouter, Groq, PrivateGPT, DeepSeek, Cerebras, Github Models,
 ;;   GitHub Copilot chat, AWS Bedrock, Novita AI, xAI, Sambanova, Mistral Le
 ;;   Chat and Kagi (FastGPT & Summarizer).
 ;; - Local models via Ollama, Llama.cpp, Llamafiles or GPT4All
@@ -73,7 +73,7 @@
 ;; - For Gemini: define a gptel-backend with `gptel-make-gemini', which see.
 ;; - For Anthropic (Claude): define a gptel-backend with `gptel-make-anthropic',
 ;;   which see.
-;; - For Together.ai, Anyscale, Groq, OpenRouter, DeepSeek, Cerebras or
+;; - For AI/ML API, Together.ai, Anyscale, Groq, OpenRouter, DeepSeek, Cerebras or
 ;;   Github Models: define a gptel-backend with `gptel-make-openai', which see.
 ;; - For PrivateGPT: define a backend with `gptel-make-privategpt', which see.
 ;; - For Perplexity: define a backend with `gptel-make-perplexity', which see.
@@ -1867,7 +1867,7 @@ implementation, used by OpenAI-compatible APIs and Ollama."
                                               (plist-get arg :name)))
                                 (gptel-tool-args tool))))
                     :additionalProperties :json-false))
-          (list :parameters :null)))))
+          (list :parameters (list :type "object" :properties nil))))))
     (ensure-list tools))))
 
 (cl-defgeneric gptel--parse-tool-results (backend results)
@@ -3105,8 +3105,11 @@ See `gptel-curl--get-response' for its contents.")
                          ((not (string-blank-p resp))))
                 (string-trim resp))
               http-status http-msg))
-       ((plist-get response :error)
-        (list nil http-status http-msg (plist-get response :error)))
+       ((and-let* ((error-data
+                    (cond ((plistp response) (plist-get response :error))
+                          ((arrayp response)
+                           (cl-some (lambda (el) (plist-get el :error)) response)))))
+          (list nil http-status http-msg error-data)))
        ((eq response 'json-read-error)
         (list nil http-status (concat "(" http-msg ") Malformed JSON in response.") "json-read-error"))
        (t (list nil http-status (concat "(" http-msg ") Could not parse HTTP response.")

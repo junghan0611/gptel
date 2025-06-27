@@ -793,7 +793,26 @@ Also format its value in the Transient menu."
        (gptel--inspect-query
         (gptel--suffix-send
          (cons "I" (transient-args transient-current-command)))
-        'json)))]]
+        'json)))]
+   ["Logging"
+    :if (lambda () (or gptel-log-level gptel-expert-commands))
+    ("-l" "Log level" "-l"
+     :class gptel-lisp-variable
+     :variable gptel-log-level
+     :set-value gptel--set-with-scope
+     :display-nil "Off"
+     :prompt "Prompt: "
+     :reader
+     (lambda (prompt _ _)
+       "Manage gptel's logging."
+       (let ((state (completing-read
+                     "Log level: " '(off info debug) nil t)))
+         (message "Log level set to %s" state)
+         (if (eq state 'off) nil (intern state)))))
+    ("L" "Inspect Log"
+     (lambda () (interactive)
+       (pop-to-buffer (get-buffer-create gptel--log-buffer-name)))
+     :format "  %k %d")]]
   [(gptel--suffix-send)]
   (interactive)
   (gptel--sanitize-model)
@@ -993,7 +1012,7 @@ only (\"oneshot\")."
         for (category . tools-alist) in gptel--known-tools
         with unused-keys = (nconc (delete ?q (number-sequence ?a ?z))
                                   (number-sequence ?0 ?9)
-                                  (number-sequence ?A ?Z))
+                                  (delete ?M (number-sequence ?A ?Z))) ;M used by MCP integration
         for category-key = (seq-find (lambda (k) (member k unused-keys))
                                      (string-remove-prefix "mcp-" category)
                                      (seq-first unused-keys))
@@ -1025,7 +1044,7 @@ only (\"oneshot\")."
                 (concat (make-string (max (- 20 (length name)) 0) ? )
                         (propertize
                          (concat "(" (gptel--describe-directive
-                                      (gptel-tool-description tool) (- (window-width) 40))
+                                      (gptel-tool-description tool) (- (window-width) 60))
                                  ")")
                          'face 'shadow))
                 (gptel-tool-name tool)
