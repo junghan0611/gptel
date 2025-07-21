@@ -4,7 +4,7 @@
 
 ;; Author: Karthik Chikmagalur <karthik.chikmagalur@gmail.com>
 ;; Version: 0.9.8.5
-;; Package-Requires: ((emacs "27.1") (transient "0.7.4") (compat "29.1.4.1"))
+;; Package-Requires: ((emacs "27.1") (transient "0.7.4") (compat "30.1.0.0"))
 ;; Keywords: convenience, tools
 ;; URL: https://github.com/karthink/gptel
 
@@ -1624,10 +1624,12 @@ Convert symbol :types to strings."
               (setcar (cdr tail) (symbol-name (cadr tail))))
             (when (equal (cadr tail) "object") ;Add additional object fields
               (plist-put tail :additionalProperties :json-false)
-              (let ((props
-                     (cl-loop for prop in (plist-get tail :properties) by #'cddr
-                              collect (substring (symbol-name prop) 1))))
-                (plist-put tail :required (vconcat props)))))
+              (let ((vprops (vconcat
+                             (cl-loop
+                              for prop in (plist-get tail :properties) by #'cddr
+                              collect (substring (symbol-name prop) 1)))))
+                (plist-put tail :required vprops)
+                (plist-put tail :propertyOrdering vprops))))
           (when (or (listp (cadr tail)) (vectorp (cadr tail)))
             (gptel--preprocess-schema (cadr tail)))
           (setq tail (cddr tail)))))
@@ -3684,8 +3686,8 @@ kill-ring."
 (defun gptel--apply-preset (preset &optional setter)
   "Apply gptel PRESET with SETTER.
 
-PRESET is the name of a preset, or a spec of the form
- (NAME :KEY1 VAL1 :KEY2 VAL2 ...).
+PRESET is the name of a preset, or a spec (plist) of the form
+ (:KEY1 VAL1 :KEY2 VAL2 ...).
 
 SETTER is the function used to set the gptel options.  It must accept
 two arguments, the symbol being set and the value to set it to.  It
@@ -3695,10 +3697,10 @@ example) apply the preset buffer-locally."
     (let ((spec (or (gptel-get-preset preset)
                     (user-error "gptel preset \"%s\": Cannot find preset."
                                 preset))))
-      (setq preset (cons preset spec))))
+      (setq preset spec)))
   (unless setter (setq setter #'set))
-  (when-let* ((func (plist-get (cdr preset) :pre))) (funcall func))
-  (when-let* ((parents (plist-get (cdr preset) :parents)))
+  (when-let* ((func (plist-get preset :pre))) (funcall func))
+  (when-let* ((parents (plist-get preset :parents)))
     (mapc #'gptel--apply-preset (ensure-list parents)))
   (map-do
    (lambda (key val)
@@ -3710,16 +3712,14 @@ example) apply the preset buffer-locally."
           (if (and (symbolp val) (not (functionp val)))
               (if-let* ((directive (alist-get val gptel-directives)))
                   (funcall setter sym directive)
-                (user-error "gptel preset \"%s\": Cannot find directive %s"
-                            (car preset) val))
+                (user-error "gptel preset: Cannot find directive %s" val))
             (funcall setter sym val))))
        (:backend
         (setq val (cl-etypecase val
                     (gptel-backend val)
                     (string (gptel-get-backend val))))
         (unless val
-          (user-error "gptel preset \"%s\": Cannot find backend %s."
-                      (car preset) val))
+          (user-error "gptel preset: Cannot find backend %s." val))
         (funcall setter 'gptel-backend val))
        (:tools                          ;TEMP Confirm this `:append' convention
         (let* ((append (when (eq (car-safe val) :append) (setq val (cdr val)) t))
@@ -3731,8 +3731,7 @@ example) apply the preset buffer-locally."
                                        (string (ignore-errors
                                                  (gptel-get-tool tool-name))))
                           do (unless tool
-                               (user-error "gptel preset \"%s\": Cannot find tool %s."
-                                           (car preset) val))
+                               (user-error "gptel preset: Cannot find tool %s." val))
                           collect tool))))
           (funcall setter 'gptel-tools ;append makes a copy of gptel-tools, intentional
                    (if append (delete-dups (append gptel-tools tools)) tools))))
@@ -3744,15 +3743,20 @@ example) apply the preset buffer-locally."
         (funcall setter sym val))
        (_ (display-warning
            '(gptel presets)
-           (format "gptel preset \"%s\": setting for %s not found, ignoring."
-                   (car preset) key)))))
-   (cdr preset))
-  (when-let* ((func (plist-get (cdr preset) :post))) (funcall func)))
+           (format "gptel preset: setting for %s not found, ignoring." key)))))
+   preset)
+  (when-let* ((func (plist-get preset :post))) (funcall func)))
 
 (defun gptel--preset-syms (preset)
   "Return a list of gptel variables (symbols) set by PRESET.
 
-PRESET is a spec (plist) of keys and values."
+PRESET is the name of a preset, or a spec (plist) of the form
+ (:KEY1 VAL1 :KEY2 VAL2 ...)."
+  (when (memq (type-of preset) '(string symbol))
+    (let ((spec (or (gptel-get-preset preset)
+                    (user-error "gptel preset \"%s\": Cannot find preset."
+                                preset))))
+      (setq preset spec)))
   (let* ((index preset)
          syms key val)
     (while index
@@ -3780,14 +3784,14 @@ PRESET is a spec (plist) of keys and values."
   "Run BODY with gptel preset NAME applied.
 
 This macro can be used to create `gptel-request' command with settings
-from a gptel preset applied.  NAME is the preset name, typically a
-symbol."
+from a gptel preset applied.
+
+NAME is the name of a preset, or a spec (plist) of the form
+ (:KEY1 VAL1 :KEY2 VAL2 ...).  It must be quoted."
   (declare (indent 1))
-  `(cl-progv (gptel--preset-syms
-              (gptel-get-preset ,(if (symbolp name) `',name name)))
-       nil
-     (gptel--apply-preset ,(if (symbolp name) `',name name))
-     ,@body))
+  `(cl-progv (gptel--preset-syms ,name) nil
+    (gptel--apply-preset ,name)
+    ,@body))
 
 ;;;; Presets in-buffer UI
 (defun gptel--transform-apply-preset (_fsm)
@@ -3805,7 +3809,7 @@ If the user prompt begins with @foo, the preset foo is applied."
                     (preset (or (gptel-get-preset (intern-soft name))
                                 (gptel-get-preset name))))
           (delete-region (match-beginning 0) (match-end 0))
-          (gptel--apply-preset (cons name preset)
+          (gptel--apply-preset preset
                                (lambda (sym val)
                                  (set (make-local-variable sym) val))))))))
 
